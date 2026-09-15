@@ -1,0 +1,27 @@
+# Composer dependencies
+# (Never commit vendor/ as it is generated via 'composer install')
+/vendor/
+
+# Configuration and Secrets
+# (Never commit actual passwords/keys; use .env.example for templates)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs and Caches
+*.log
+/logs/
+.phpunit.result.cache
+
+# Development tools and OS files
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db

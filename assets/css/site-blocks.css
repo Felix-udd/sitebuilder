@@ -1,0 +1,42 @@
+/* Shared block rendering styles.
+   Loaded by editor.html (so the canvas matches reality while building)
+   AND inlined into every published page by includes/render.php.
+   Keep this the single source of truth for block appearance. */
+
+* { box-sizing: border-box; }
+
+.sb-block { padding: 10px 20px; max-width: 960px; margin: 0 auto; }
+
+.sb-hero, .sb-nav, .sb-grid-full { max-width: none; }
+
+.sb-hero { padding: 88px 32px; }
+.sb-hero h1 { margin: 0 0 16px; font-size: 42px; line-height: 1.15; }
+.sb-hero-sub { font-size: 18px; opacity: 0.85; margin: 0 0 24px; max-width: 640px; }
+
+.sb-btn { display: inline-block; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: 600; }
+
+.sb-columns { display: flex; gap: 24px; }
+.sb-col { flex: 1; padding: 8px; }
+
+.sb-grid { display: grid; }
+.sb-grid-cell { padding: 12px; }
+
+.sb-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 32px;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.sb-nav-logo { font-weight: 700; font-size: 19px; }
+.sb-nav-links { display: flex; align-items: center; gap: 26px; flex-wrap: wrap; }
+.sb-nav-links a { text-decoration: none; color: inherit; font-size: 14px; opacity: 0.9; }
+.sb-nav-links a:hover { opacity: 1; }
+.sb-nav-cta { text-decoration: none; padding: 8px 18px; border-radius: 6px; font-size: 14px; font-weight: 600; }
+
+@media (max-width: 640px) {
+  .sb-columns { flex-direction: column; }
+  .sb-hero h1 { font-size: 30px; }
+  .sb-nav { flex-direction: column; align-items: flex-start; }
+}

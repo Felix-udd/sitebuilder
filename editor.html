@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SiteBuilder — Editor</title>
+<link rel="stylesheet" href="assets/css/editor.css">
+<link rel="stylesheet" href="assets/css/site-blocks.css">
+</head>
+<body>
+  <div class="editor-shell">
+    <header class="editor-topbar">
+      <div class="topbar-left">
+        <a href="index.php">&larr; Projects</a>
+        <input type="text" id="pageNameInput" value="Untitled Page" spellcheck="false">
+      </div>
+      <div class="topbar-right">
+        <span id="saveStatus">Saved</span>
+        <button id="previewBtn" class="btn btn-ghost btn-sm">Preview</button>
+        <button id="exportBtn" class="btn btn-ghost btn-sm">Export</button>
+        <button id="saveBtn" class="btn btn-sm">Save</button>
+        <button id="publishBtn" class="btn btn-accent btn-sm">Publish</button>
+      </div>
+    </header>
+
+    <aside class="palette" id="palette"></aside>
+
+    <div class="canvas-wrap">
+      <div class="canvas-page" id="canvasPage"></div>
+    </div>
+
+    <aside class="props-panel" id="propsPanel"></aside>
+  </div>
+
+  <script src="assets/js/blocks.js"></script>
+  <script src="assets/js/editor.js"></script>
+</body>
+</html>
