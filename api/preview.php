@@ -1,5 +1,6 @@
 <?php
-require_once __DIR__ . '/../includes/render.php';
+require_once __DIR__ . '/../config/security.php';
+sb_require_admin_access(true);
 require_once __DIR__ . '/../config/db.php';
 
 // Preview can come from a saved page id, or from raw content posted
@@ -30,4 +31,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 header('Content-Type: text/html; charset=UTF-8');
-echo render_page($name, $content['blocks'] ?? [], $content['settings'] ?? []);
+
+if (isset($content['version']) && $content['version'] === 2 && isset($content['page'])) {
+    // v2 IR → new compiler
+    require_once __DIR__ . '/../includes/compiler.php';
+    $content['submitUrl'] = 'submit.php';
+    $content['dbPageId'] = $_SERVER['REQUEST_METHOD'] === 'POST' ? (int) ($data['id'] ?? 0) : (int) ($id ?? 0);
+    echo compile_page($content);
+} else {
+    // Legacy v1 format → old renderer
+    require_once __DIR__ . '/../includes/render.php';
+    echo render_page($name, $content['blocks'] ?? [], $content['settings'] ?? []);
+}

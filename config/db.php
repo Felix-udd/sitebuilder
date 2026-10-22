@@ -20,8 +20,9 @@ function get_db_connection() {
     if ($conn->connect_error) {
         http_response_code(500);
         header('Content-Type: application/json');
+        error_log('SiteBuilder database connection failed: ' . $conn->connect_error);
         echo json_encode([
-            'error' => 'Database connection failed: ' . $conn->connect_error
+            'error' => 'Database connection failed. Check the server configuration and logs.'
         ]);
         exit;
     }

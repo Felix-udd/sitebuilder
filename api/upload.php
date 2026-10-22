@@ -1,6 +1,9 @@
 <?php
+require_once __DIR__ . '/../config/security.php';
+sb_require_admin_access(true);
 header('Content-Type: application/json');
 require_once __DIR__ . '/../config/paths.php';
+require_once __DIR__ . '/../config/db.php';
 
 define('MAX_BYTES', 5 * 1024 * 1024); // 5MB
 define('ALLOWED_MIME', [
@@ -60,7 +63,24 @@ if (!move_uploaded_file($file['tmp_name'], $destination)) {
     exit;
 }
 
+// Track the upload so the asset manager can list it
+$assetId = 0;
+try {
+    $conn = get_db_connection();
+    $url = UPLOADS_URL . '/' . $filename;
+    $stmt = $conn->prepare('INSERT INTO assets (filename, url, mime_type, size_bytes) VALUES (?, ?, ?, ?)');
+    $size = (int) $file['size'];
+    $stmt->bind_param('sssi', $filename, $url, $mime, $size);
+    if ($stmt->execute()) {
+        $assetId = $stmt->insert_id;
+    }
+    $stmt->close();
+} catch (Throwable $e) {
+    // Asset bookkeeping is non-critical; the upload still succeeded.
+}
+
 echo json_encode([
     'success' => true,
+    'id' => $assetId,
     'url' => UPLOADS_URL . '/' . $filename,
 ]);

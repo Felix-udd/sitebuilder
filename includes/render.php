@@ -94,7 +94,7 @@ function render_block($block) {
                  . '</section>';
 
         case 'heading':
-            $level = in_array($props['level'] ?? 'h2', ['h1','h2','h3','h4'], true) ? $props['level'] : 'h2';
+            $level = in_array($props['level'] ?? 'h2', ['h1','h2','h3','h4'], true) ? ($props['level'] ?? 'h2') : 'h2';
             $align = h($props['align'] ?? 'left');
             $color = h($props['color'] ?? '#1A1A1A');
             $text  = h($props['text'] ?? '');

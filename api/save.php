@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/../config/security.php';
+sb_require_admin_access(true);
 header('Content-Type: application/json');
 require_once __DIR__ . '/../config/db.php';
 
@@ -44,12 +46,36 @@ function make_slug($conn, $name, $excludeId = 0) {
 }
 
 if ($id > 0) {
+    // Snapshot the previous content before overwriting it
+    $prevStmt = $conn->prepare('SELECT content FROM pages WHERE id = ? LIMIT 1');
+    $prevStmt->bind_param('i', $id);
+    $prevStmt->execute();
+    $previous = $prevStmt->get_result()->fetch_assoc();
+    $prevStmt->close();
+
+    if ($previous && $previous['content'] !== $content) {
+        $revStmt = $conn->prepare('INSERT INTO page_revisions (page_id, content) VALUES (?, ?)');
+        $revStmt->bind_param('is', $id, $previous['content']);
+        $revStmt->execute();
+        $revStmt->close();
+
+        // Keep only the 30 most recent revisions per page
+        $pruneStmt = $conn->prepare(
+            'DELETE FROM page_revisions WHERE page_id = ? AND id NOT IN ('
+            . 'SELECT id FROM (SELECT id FROM page_revisions WHERE page_id = ? ORDER BY id DESC LIMIT 30) keep)'
+        );
+        $pruneStmt->bind_param('ii', $id, $id);
+        $pruneStmt->execute();
+        $pruneStmt->close();
+    }
+
     // Update existing page
     $stmt = $conn->prepare('UPDATE pages SET name = ?, content = ? WHERE id = ?');
     $stmt->bind_param('ssi', $name, $content, $id);
     if (!$stmt->execute()) {
         http_response_code(500);
-        echo json_encode(['error' => 'Failed to save: ' . $stmt->error]);
+        error_log('SiteBuilder save failed: ' . $stmt->error);
+        echo json_encode(['error' => 'Failed to save the page. Check server logs.']);
         exit;
     }
     $stmt->close();
@@ -68,7 +94,8 @@ if ($id > 0) {
     $stmt->bind_param('sss', $name, $slug, $content);
     if (!$stmt->execute()) {
         http_response_code(500);
-        echo json_encode(['error' => 'Failed to create page: ' . $stmt->error]);
+        error_log('SiteBuilder create page failed: ' . $stmt->error);
+        echo json_encode(['error' => 'Failed to create the page. Check server logs.']);
         exit;
     }
     $newId = $stmt->insert_id;

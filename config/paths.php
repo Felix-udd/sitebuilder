@@ -3,7 +3,7 @@
 // so generated URLs (like uploaded image paths) are correct no matter what
 // folder name you installed SiteBuilder under, or whether it's at the web
 // root. Needed because pages get viewed from several different depths:
-// editor.html (root), api/preview.php (one level down), and
+// editor.php (root), api/preview.php (one level down), and
 // published/<slug>.html (also one level down).
 
 function app_base_url() {

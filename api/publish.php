@@ -1,6 +1,7 @@
 <?php
+require_once __DIR__ . '/../config/security.php';
+sb_require_admin_access(true);
 header('Content-Type: application/json');
-require_once __DIR__ . '/../includes/render.php';
 require_once __DIR__ . '/../config/db.php';
 
 $conn = get_db_connection();
@@ -28,7 +29,18 @@ if (!$page) {
 }
 
 $content = json_decode($page['content'], true);
-$html = render_page($page['name'], $content['blocks'] ?? [], $content['settings'] ?? []);
+
+if (isset($content['version']) && $content['version'] === 2 && isset($content['page'])) {
+    // v2 IR → new compiler
+    require_once __DIR__ . '/../includes/compiler.php';
+    $content['submitUrl'] = '../api/submit.php';
+    $content['dbPageId'] = $id;
+    $html = compile_page($content);
+} else {
+    // Legacy v1 format → old renderer
+    require_once __DIR__ . '/../includes/render.php';
+    $html = render_page($page['name'], $content['blocks'] ?? [], $content['settings'] ?? []);
+}
 
 $publishedDir = __DIR__ . '/../published';
 if (!is_dir($publishedDir)) {

@@ -1,5 +1,5 @@
 /* Shared block rendering styles.
-   Loaded by editor.html (so the canvas matches reality while building)
+   Loaded by editor.php (so the canvas matches reality while building)
    AND inlined into every published page by includes/render.php.
    Keep this the single source of truth for block appearance. */
 
