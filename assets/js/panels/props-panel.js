@@ -83,6 +83,7 @@ const PropsPanel = (() => {
       case 'image':
         return row(f, `<div class="field-upload-row">
           <button type="button" class="btn btn-sm" data-upload-for="${f.key}">Upload</button>
+          <button type="button" class="btn btn-sm" data-library-for="${f.key}">Library</button>
           <input type="file" accept="image/*" data-upload-input="${f.key}" hidden>
           <input type="url" data-prop-field="${f.key}" value="${escapeA(value ?? '')}" placeholder="Image URL">
         </div>
@@ -103,6 +104,7 @@ const PropsPanel = (() => {
           ${rows || '<div class="gallery-empty">No images yet.</div>'}
           <div class="field-upload-row">
             <button type="button" class="btn btn-sm" data-gallery-add>+ Add image</button>
+            <button type="button" class="btn btn-sm" data-gallery-library>Library</button>
             <input type="file" accept="image/*" data-gallery-file hidden>
           </div>
         </div>`);
@@ -121,7 +123,10 @@ const PropsPanel = (() => {
           </div>`).join('');
         return row(f, `<div class="slides-editor" data-slides>
           ${rows || '<div class="gallery-empty">No slides yet.</div>'}
-          <button type="button" class="btn btn-sm" data-slide-add>+ Add slide</button>
+          <div class="field-upload-row">
+            <button type="button" class="btn btn-sm" data-slide-add>+ Add slide</button>
+            <button type="button" class="btn btn-sm" data-slide-library>Library image</button>
+          </div>
           <input type="file" accept="image/*" data-slide-file hidden>
         </div>`);
       }
@@ -241,6 +246,18 @@ const PropsPanel = (() => {
       }
     });
 
+    // Media-library pickers for single image fields
+    el.querySelectorAll('[data-library-for]').forEach(btn => {
+      const key = btn.dataset.libraryFor;
+      btn.addEventListener('click', () => {
+        if (typeof AssetManager === 'undefined') return;
+        AssetManager.open(url => {
+          Store.dispatch(Commands.setProp(nodeId, key, url));
+          if (typeof Editor !== 'undefined') Editor.refreshPanels(true);
+        });
+      });
+    });
+
     setupGallery(nodeId, el);
     setupSlides(nodeId, el);
 
@@ -298,7 +315,18 @@ const PropsPanel = (() => {
       addBtn.addEventListener('click', () => fileInput.click());
       fileInput.addEventListener('change', () => uploadImage(fileInput.files[0], url => {
         setImages([...getImages(), { src: url, alt: '' }]);
+        if (typeof Editor !== 'undefined') Editor.refreshPanels(true);
       }));
+    }
+    const libraryBtn = wrap.querySelector('[data-gallery-library]');
+    if (libraryBtn) {
+      libraryBtn.addEventListener('click', () => {
+        if (typeof AssetManager === 'undefined') return;
+        AssetManager.open(url => {
+          setImages([...getImages(), { src: url, alt: '' }]);
+          if (typeof Editor !== 'undefined') Editor.refreshPanels(true);
+        });
+      });
     }
   }
 
@@ -355,6 +383,16 @@ const PropsPanel = (() => {
     const addBtn = wrap.querySelector('[data-slide-add]');
     if (addBtn) {
       addBtn.addEventListener('click', () => setSlides([...getSlides(), { image: '', heading: '', text: '' }]));
+    }
+    const libraryBtn = wrap.querySelector('[data-slide-library]');
+    if (libraryBtn) {
+      libraryBtn.addEventListener('click', () => {
+        if (typeof AssetManager === 'undefined') return;
+        AssetManager.open(url => {
+          setSlides([...getSlides(), { image: url, heading: '', text: '' }]);
+          if (typeof Editor !== 'undefined') Editor.refreshPanels(true);
+        });
+      });
     }
   }
 

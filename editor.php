@@ -34,10 +34,14 @@
         <button id="redoBtn" class="btn btn-ghost btn-sm" title="Redo (Ctrl+Y)">↷</button>
         <div class="topbar-sep"></div>
         <button id="historyBtn" class="btn btn-ghost btn-sm">History</button>
+        <button id="mediaBtn" class="btn btn-ghost btn-sm" title="Media library (M)">Media</button>
         <button id="previewBtn" class="btn btn-ghost btn-sm">Preview</button>
         <button id="exportBtn" class="btn btn-ghost btn-sm">Export</button>
         <button id="saveBtn" class="btn btn-sm">Save</button>
+        <span id="publishStatus" class="publish-status" hidden></span>
+        <a id="viewLiveLink" class="btn btn-ghost btn-sm" target="_blank" rel="noopener" hidden>View live</a>
         <button id="publishBtn" class="btn btn-accent btn-sm">Publish</button>
+        <button id="shortcutsBtn" class="btn btn-ghost btn-sm" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
         <a href="logout.php" class="btn btn-ghost btn-sm" style="text-decoration:none;">Sign out</a>
       </div>
     </header>
@@ -128,6 +132,34 @@
     <button data-action="delete" class="danger">Delete</button>
   </div>
 
+  <!-- Keyboard Shortcuts Modal -->
+  <div class="modal-overlay" id="shortcutsModal" hidden>
+    <div class="modal shortcuts-modal">
+      <div class="modal-header">
+        <h3>Keyboard shortcuts</h3>
+        <button class="modal-close" id="shortcutsClose" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="shortcut-grid">
+          <span>Save</span><span><kbd>Ctrl</kbd> + <kbd>S</kbd></span>
+          <span>Undo / Redo</span><span><kbd>Ctrl</kbd> + <kbd>Z</kbd> / <kbd>Ctrl</kbd> + <kbd>Y</kbd></span>
+          <span>Duplicate element</span><span><kbd>Ctrl</kbd> + <kbd>D</kbd></span>
+          <span>Copy / Paste element</span><span><kbd>Ctrl</kbd> + <kbd>C</kbd> / <kbd>Ctrl</kbd> + <kbd>V</kbd></span>
+          <span>Cut element</span><span><kbd>Ctrl</kbd> + <kbd>X</kbd></span>
+          <span>Delete element</span><span><kbd>Delete</kbd></span>
+          <span>Nudge element (1px / 10px)</span><span><kbd>Arrow keys</kbd> / <kbd>Shift</kbd> + <kbd>Arrow</kbd></span>
+          <span>Move element up / down</span><span><kbd>Ctrl</kbd> + <kbd>↑</kbd> / <kbd>Ctrl</kbd> + <kbd>↓</kbd></span>
+          <span>Select parent / first child</span><span><kbd>Alt</kbd> + <kbd>↑</kbd> / <kbd>Alt</kbd> + <kbd>↓</kbd></span>
+          <span>Edit text inline</span><span><kbd>Double-click</kbd></span>
+          <span>Deselect / close dialog</span><span><kbd>Esc</kbd></span>
+          <span>Zoom in / out / reset</span><span><kbd>Ctrl</kbd> + <kbd>+</kbd> / <kbd>−</kbd> / <kbd>0</kbd></span>
+          <span>Media library</span><span><kbd>M</kbd></span>
+          <span>This help</span><span><kbd>?</kbd></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Revision History Modal -->
   <div class="modal-overlay" id="historyModal" hidden>
     <div class="modal">
@@ -146,6 +178,7 @@
   <script src="assets/js/panels/style-panel.js"></script>
   <script src="assets/js/panels/props-panel.js"></script>
   <script src="assets/js/panels/animation-panel.js"></script>
+  <script src="assets/js/panels/asset-manager.js"></script>
   <script src="assets/js/canvas/canvas.js"></script>
   <script src="assets/js/canvas/layers.js"></script>
   <script src="assets/js/editor.js"></script>

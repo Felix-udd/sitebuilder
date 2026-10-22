@@ -493,6 +493,7 @@ const StylePanel = (() => {
               <label>Image</label>
               <div class="field-upload-row">
                 <button type="button" class="btn btn-sm" data-bg-upload>Upload</button>
+                <button type="button" class="btn btn-sm" data-bg-library>Library</button>
                 <input type="file" accept="image/*" data-bg-upload-input hidden>
               </div>
               <input type="url" placeholder="Image URL" value="${escapeHtml(props.backgroundImage || '')}" data-prop="backgroundImage">
@@ -1032,6 +1033,18 @@ const StylePanel = (() => {
             alert('Upload failed: ' + data.error);
           }
         } catch (e) { console.error('Upload failed:', e); }
+      });
+    }
+
+    // Background image from the media library
+    const bgLibraryBtn = el.querySelector('[data-bg-library]');
+    if (bgLibraryBtn && typeof AssetManager !== 'undefined') {
+      bgLibraryBtn.addEventListener('click', () => {
+        AssetManager.open(url => {
+          Store.dispatch(Commands.setProp(nodeId, 'backgroundType', 'image'));
+          Store.dispatch(Commands.setProp(nodeId, 'backgroundImage', url));
+          if (typeof Editor !== 'undefined') Editor.refreshPanels(true);
+        });
       });
     }
 

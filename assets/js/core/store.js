@@ -60,6 +60,12 @@ const Store = (() => {
     notify();
   }
 
+  function markDirty() {
+    if (_dirty) return;
+    _dirty = true;
+    notify();
+  }
+
   function subscribe(fn) {
     _listeners.push(fn);
     return () => {
@@ -364,6 +370,7 @@ const Store = (() => {
     setBreakpoint,
     isDirty,
     markSaved,
+    markDirty,
     subscribe,
     notify,
     dispatch,

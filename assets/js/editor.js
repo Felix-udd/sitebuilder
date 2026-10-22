@@ -35,12 +35,15 @@ const Editor = (() => {
     bindPanelTabs();
     bindContextMenu();
     bindShortcuts();
+    restoreDraft();
+    startAutosave();
 
     // React to every store change
     Store.subscribe(onStoreChange);
 
     // Initial render
     onStoreChange();
+    updatePublishUI();
 
     // Click empty canvas deselects
     document.getElementById('canvasViewport').addEventListener('click', (e) => {
@@ -58,6 +61,8 @@ const Editor = (() => {
     renderActivePanel();
     updateTopbar();
     updateSaveStatus();
+    scheduleDraftSave();
+    updatePublishUI();
 
     // Keep the topbar name in sync with page settings
     const input = document.getElementById('pageNameInput');
@@ -180,9 +185,10 @@ const Editor = (() => {
       Store.setSelectedId(node.id);
       Layers.revealNode(node.id);
       showToast(`Added ${def.label}`);
-    } else {
-      showToast(`Cannot place ${def.label} here`, true);
+      return node.id;
     }
+    showToast(`Cannot place ${def.label} here`, true);
+    return null;
   }
 
   // ---------- SIDEBAR / PANEL TABS ----------
@@ -636,11 +642,29 @@ const Editor = (() => {
     document.getElementById('historyModal').addEventListener('click', (e) => {
       if (e.target.id === 'historyModal') closeHistory();
     });
+
+    document.getElementById('mediaBtn').addEventListener('click', () => {
+      if (typeof AssetManager !== 'undefined') AssetManager.open();
+    });
+    document.getElementById('shortcutsBtn').addEventListener('click', openShortcuts);
+    document.getElementById('shortcutsClose').addEventListener('click', closeShortcuts);
+    document.getElementById('shortcutsModal').addEventListener('click', (e) => {
+      if (e.target.id === 'shortcutsModal') closeShortcuts();
+    });
+  }
+
+  function openShortcuts() {
+    document.getElementById('shortcutsModal').hidden = false;
+  }
+
+  function closeShortcuts() {
+    document.getElementById('shortcutsModal').hidden = true;
   }
 
   function setZoom(z) {
     zoom = Math.max(0.25, Math.min(2, Math.round(z * 100) / 100));
     applyZoom();
+    if (typeof Canvas !== 'undefined' && Canvas.refreshOverlays) Canvas.refreshOverlays();
   }
 
   function applyZoom() {
@@ -658,50 +682,237 @@ const Editor = (() => {
     document.getElementById('redoBtn').disabled = !Store.canRedo();
   }
 
+  // ---------- SAVE STATUS / AUTOSAVE / DRAFTS ----------
+
+  let saveInFlight = null;
+  let lastSavedAt = null;
+  let lastSaveError = null;
+  let draftTimer = null;
+  let autosaveTimer = null;
+
   function updateSaveStatus() {
     const el = document.getElementById('saveStatus');
-    if (Store.isDirty()) {
+    if (!el) return;
+    if (saveInFlight) {
+      el.textContent = 'Saving…';
+      el.className = 'save-status saving';
+    } else if (lastSaveError) {
+      el.textContent = 'Save failed';
+      el.className = 'save-status error';
+      el.title = String(lastSaveError.message || lastSaveError);
+      return;
+    } else if (Store.isDirty()) {
       el.textContent = 'Unsaved changes';
       el.className = 'save-status dirty';
+    } else if (lastSavedAt) {
+      el.textContent = 'Saved ' + timeAgo(lastSavedAt);
+      el.className = 'save-status saved';
     } else {
       el.textContent = 'Saved';
       el.className = 'save-status saved';
+    }
+    el.title = lastSavedAt ? new Date(lastSavedAt).toLocaleString() : '';
+  }
+
+  function timeAgo(ts) {
+    const diff = Math.max(0, Date.now() - Number(ts));
+    const sec = Math.floor(diff / 1000);
+    if (sec < 10) return 'just now';
+    if (sec < 60) return sec + 's ago';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return min + 'm ago';
+    return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function draftKey(id) {
+    return 'sb.draft.' + (id || 'new');
+  }
+
+  function persistDraft() {
+    if (!Store.isDirty()) return;
+    try {
+      localStorage.setItem(draftKey(pageId), JSON.stringify({
+        savedAt: Date.now(),
+        name: document.getElementById('pageNameInput').value,
+        content: Store.serialize()
+      }));
+    } catch (_) { /* storage full or disabled */ }
+  }
+
+  function scheduleDraftSave() {
+    if (!Store.isDirty()) return;
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(persistDraft, 800);
+  }
+
+  function clearDraft() {
+    clearTimeout(draftTimer);
+    draftTimer = null;
+    try {
+      localStorage.removeItem('sb.draft.new');
+      localStorage.removeItem(draftKey(pageId));
+    } catch (_) {}
+  }
+
+  function restoreDraft() {
+    let raw = null;
+    try { raw = localStorage.getItem(draftKey(pageId)); } catch (_) { return; }
+    if (!raw) return;
+
+    let draft = null;
+    try { draft = JSON.parse(raw); } catch (_) { return; }
+    if (!draft || !draft.content) return;
+
+    if (JSON.stringify(draft.content) === JSON.stringify(Store.serialize())) {
+      try { localStorage.removeItem(draftKey(pageId)); } catch (_) {}
+      return;
+    }
+
+    const when = draft.savedAt ? new Date(draft.savedAt).toLocaleString() : 'an earlier session';
+    const ok = confirm(`An unsaved draft from ${when} was found for this page.\n\nRestore it? Choose Cancel to discard the draft and keep the saved version.`);
+    if (!ok) {
+      try { localStorage.removeItem(draftKey(pageId)); } catch (_) {}
+      return;
+    }
+
+    Store.loadFromSerialized(draft.content);
+    const input = document.getElementById('pageNameInput');
+    if (input && draft.name) input.value = draft.name;
+    Store.markDirty();
+    setTimeout(() => showToast('Draft restored — press Save to keep it'), 400);
+  }
+
+  function startAutosave() {
+    if (autosaveTimer) return;
+    autosaveTimer = setInterval(() => {
+      if (pageId > 0 && Store.isDirty() && !saveInFlight && !document.body.classList.contains('sb-resizing')) {
+        save({ silent: true }).catch(() => {});
+      }
+    }, 20000);
+    setInterval(() => updateSaveStatus(), 15000);
+  }
+
+  // ---------- PUBLISH STATE ----------
+
+  function pubKey() {
+    return 'sb.pub.' + pageId;
+  }
+
+  function loadPubState() {
+    if (!pageId) return null;
+    try { return JSON.parse(localStorage.getItem(pubKey()) || 'null'); } catch (_) { return null; }
+  }
+
+  function hashContent(serialized) {
+    const str = JSON.stringify(serialized);
+    let h = 5381;
+    for (let i = 0; i < str.length; i++) {
+      h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+    }
+    return (h >>> 0).toString(36);
+  }
+
+  function updatePublishUI() {
+    const badge = document.getElementById('publishStatus');
+    const link = document.getElementById('viewLiveLink');
+    if (!badge || !link) return;
+
+    const pub = loadPubState();
+    if (pub && pub.url) {
+      link.hidden = false;
+      link.href = pub.url;
+    } else {
+      link.hidden = true;
+      link.removeAttribute('href');
+    }
+
+    if (!pageId) { badge.hidden = true; return; }
+    badge.hidden = false;
+    if (!pub) {
+      badge.textContent = 'Not published';
+      badge.className = 'publish-status unpublished';
+      badge.title = 'This page has not been published yet';
+    } else if (pub.hash === hashContent(Store.serialize())) {
+      badge.textContent = 'Published';
+      badge.className = 'publish-status published';
+      badge.title = pub.at ? 'Last published ' + new Date(pub.at).toLocaleString() : 'Published';
+    } else {
+      badge.textContent = 'Unpublished changes';
+      badge.className = 'publish-status pending';
+      badge.title = 'You have changed the page since the last publish';
+    }
+  }
+
+  async function copyLiveLink() {
+    const pub = loadPubState();
+    if (!pub || !pub.url) return;
+    const absolute = new URL(pub.url, location.href).href;
+    try {
+      await navigator.clipboard.writeText(absolute);
+      showToast('Live link copied');
+    } catch (_) {
+      window.prompt('Copy the live link:', absolute);
     }
   }
 
   // ---------- SAVE / PUBLISH / PREVIEW / EXPORT ----------
 
-  async function save() {
-    const page = Store.getPage();
-    const name = document.getElementById('pageNameInput').value.trim() || 'Untitled Page';
+  async function save(opts = {}) {
+    if (saveInFlight) return saveInFlight;
 
-    try {
-      const res = await fetch('api/save.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: pageId, name, content: Store.serialize() })
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
+    saveInFlight = (async () => {
+      const page = Store.getPage();
+      const name = document.getElementById('pageNameInput').value.trim() || 'Untitled Page';
+      const previousId = pageId;
 
-      pageId = data.id;
-      Store.markSaved();
-      showToast('Saved');
+      try {
+        const res = await fetch('api/save.php', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: pageId, name, content: Store.serialize() })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
 
-      // Update URL so refresh keeps working
-      if (!location.search.includes('id=')) {
-        history.replaceState(null, '', `editor.php?id=${pageId}`);
+        pageId = data.id;
+        Store.markSaved();
+        lastSavedAt = Date.now();
+        lastSaveError = null;
+
+        // The saved copy supersedes any local crash-recovery draft.
+        try {
+          localStorage.removeItem('sb.draft.new');
+          localStorage.removeItem(draftKey(previousId));
+          localStorage.removeItem(draftKey(pageId));
+        } catch (_) {}
+        draftTimer = null;
+
+        // Update URL so refresh keeps working
+        if (!location.search.includes('id=')) {
+          history.replaceState(null, '', `editor.php?id=${pageId}`);
+        }
+
+        updateSaveStatus();
+        updatePublishUI();
+        if (!opts.silent) showToast('Saved');
+        return data;
+      } catch (e) {
+        lastSaveError = e;
+        updateSaveStatus();
+        if (!opts.silent) showToast('Save failed: ' + e.message, true);
+        throw e;
+      } finally {
+        saveInFlight = null;
+        updateSaveStatus();
       }
-      return data;
-    } catch (e) {
-      showToast('Save failed: ' + e.message, true);
-      throw e;
-    }
+    })();
+
+    return saveInFlight;
   }
 
   async function publish() {
     try {
-      await save();
+      await save({ silent: true });
       const res = await fetch('api/publish.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -709,7 +920,17 @@ const Editor = (() => {
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      showToast('Published → ' + data.url);
+
+      try {
+        localStorage.setItem(pubKey(), JSON.stringify({
+          hash: hashContent(Store.serialize()),
+          url: data.url,
+          at: Date.now()
+        }));
+      } catch (_) {}
+
+      updatePublishUI();
+      showToast('Published successfully', false, { label: 'Copy link', onClick: copyLiveLink });
       window.open(data.url, '_blank');
     } catch (e) {
       showToast('Publish failed: ' + e.message, true);
@@ -952,30 +1173,56 @@ const Editor = (() => {
   function bindShortcuts() {
     document.addEventListener('keydown', (e) => {
       const tag = e.target.tagName;
-      const isEditing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable;
+      const isEditing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
+        e.target.isContentEditable || !!(e.target.closest && e.target.closest('[contenteditable="true"]'));
       const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
 
-      if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); save(); return; }
-      if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); Store.undo(); refreshPanels(true); return; }
-      if (mod && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); Store.redo(); refreshPanels(true); return; }
-      if (mod && e.key.toLowerCase() === 'd' && !isEditing) {
+      if (mod && key === 's') { e.preventDefault(); save(); return; }
+      if (mod && key === 'z' && !e.shiftKey) { e.preventDefault(); Store.undo(); refreshPanels(true); return; }
+      if (mod && (key === 'y' || (key === 'z' && e.shiftKey))) { e.preventDefault(); Store.redo(); refreshPanels(true); return; }
+      if (mod && (e.key === '+' || e.key === '=')) { e.preventDefault(); setZoom(zoom + 0.1); return; }
+      if (mod && e.key === '-') { e.preventDefault(); setZoom(zoom - 0.1); return; }
+      if (mod && e.key === '0') { e.preventDefault(); setZoom(1); return; }
+      if (mod && key === 'd' && !isEditing) {
         e.preventDefault();
         const sel = Store.getSelectedId();
         if (sel) Store.dispatch(Commands.duplicateNode(sel));
         return;
       }
-      if (mod && e.key.toLowerCase() === 'c' && !isEditing) {
+      if (mod && key === 'c' && !isEditing) {
         const sel = Store.getSelectedId();
         if (sel) copyNode(sel);
         return;
       }
-      if (mod && e.key.toLowerCase() === 'v' && !isEditing) {
+      if (mod && key === 'x' && !isEditing) {
+        const sel = Store.getSelectedId();
+        if (sel) {
+          e.preventDefault();
+          copyNode(sel);
+          Store.dispatch(Commands.removeNode(sel));
+          Store.setSelectedId(null);
+        }
+        return;
+      }
+      if (mod && key === 'v' && !isEditing) {
         const sel = Store.getSelectedId();
         if (sel) pasteNode(sel);
         return;
       }
 
       if (isEditing) return;
+
+      if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
+        e.preventDefault();
+        openShortcuts();
+        return;
+      }
+      if ((key === 'm') && !mod && !e.altKey) {
+        e.preventDefault();
+        if (typeof AssetManager !== 'undefined') AssetManager.open();
+        return;
+      }
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
         const sel = Store.getSelectedId();
@@ -988,8 +1235,9 @@ const Editor = (() => {
       }
 
       if (e.key === 'Escape') {
-        Store.setSelectedId(null);
+        if (closeTopModal()) return;
         hideContextMenu();
+        Store.setSelectedId(null);
         return;
       }
 
@@ -1019,23 +1267,90 @@ const Editor = (() => {
         if (sel) moveRelative(sel, e.key === 'ArrowUp' ? -1 : 1);
         return;
       }
+
+      // Nudge the selected element (relative offset). Shift = 10px steps.
+      if (!mod && !e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        const sel = Store.getSelectedId();
+        if (!sel) return;
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+        const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+        nudgeSelected(dx, dy);
+        return;
+      }
     });
 
-    // Warn on unload if dirty
+    // Warn on unload and keep a crash-recovery draft in sync
     window.addEventListener('beforeunload', (e) => {
+      persistDraft();
       if (Store.isDirty()) { e.preventDefault(); e.returnValue = ''; }
     });
+  }
+
+  function closeTopModal() {
+    const shortcuts = document.getElementById('shortcutsModal');
+    if (shortcuts && !shortcuts.hidden) { closeShortcuts(); return true; }
+    const history = document.getElementById('historyModal');
+    if (history && !history.hidden) { closeHistory(); return true; }
+    if (typeof AssetManager !== 'undefined' && AssetManager.isOpen && AssetManager.isOpen()) {
+      AssetManager.close();
+      return true;
+    }
+    return false;
+  }
+
+  function nudgeSelected(dx, dy) {
+    const sel = Store.getSelectedId();
+    if (!sel) return;
+    const page = Store.getPage();
+    const node = page.nodes[sel];
+    if (!node) return;
+
+    const bp = Store.getBreakpoint();
+    const resolved = NodeUtils.resolveStyles(node, bp);
+    const left = parseFloat(resolved.left) || 0;
+    const top = parseFloat(resolved.top) || 0;
+    const next = {
+      left: (left + dx) + 'px',
+      top: (top + dy) + 'px'
+    };
+    if (!resolved.position || resolved.position === 'static') {
+      next.position = 'relative';
+    }
+    Store.dispatch(Commands.setStyles(sel, bp, next));
   }
 
   // ---------- TOAST ----------
 
   let toastTimer = null;
-  function showToast(msg, isError = false) {
+  function showToast(msg, isError = false, action = null) {
     const t = document.getElementById('saveToast');
     t.textContent = msg;
     t.className = 'toast show' + (isError ? ' toast-error' : '');
+
+    if (action && action.label) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'toast-action';
+      btn.textContent = action.label;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        try { if (action.onClick) action.onClick(); } catch (_) {}
+        hideToast();
+      });
+      t.appendChild(btn);
+    }
+
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('show'), 2500);
+    toastTimer = setTimeout(hideToast, action ? 6000 : 2500);
+  }
+
+  function hideToast() {
+    const t = document.getElementById('saveToast');
+    if (!t) return;
+    clearTimeout(toastTimer);
+    t.classList.remove('show');
   }
 
   function escapeH(str) {

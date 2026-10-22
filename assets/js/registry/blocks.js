@@ -461,7 +461,7 @@ const BLOCK_REGISTRY = {
       borderRadius: '8px', lightbox: true, captions: false
     },
     fields: [
-      { key: 'galleryImages', label: 'Images', type: 'gallery' },
+      { key: 'images', label: 'Images', type: 'gallery' },
       { key: 'columns', label: 'Columns', type: 'number', min: 1, max: 6 },
       { key: 'gap', label: 'Gap', type: 'text' },
       { key: 'aspectRatio', label: 'Aspect ratio', type: 'select', options: [

@@ -213,10 +213,11 @@ const Canvas = (() => {
       if (el) {
         el.classList.add('is-selected');
         showToolbar(el);
+        showResizeLayer(el);
         return;
       }
     }
-    if (!selId) hideToolbar();
+    if (!selId) { hideToolbar(); hideResizeLayer(); }
   }
 
   function clearHighlights() {
@@ -276,9 +277,10 @@ const Canvas = (() => {
       if (!nodeEl) return;
       const node = Store.getPage().nodes[nodeEl.dataset.nodeId];
       if (!node) return;
-      const editableKey = findEditableTextKey(node);
-      if (editableKey) {
-        startInlineEdit(node, editableKey, nodeEl);
+      const editable = resolveInlineEdit(node, nodeEl, e.target);
+      if (editable) {
+        e.preventDefault();
+        startInlineEdit(node, editable, nodeEl);
       }
     });
 
@@ -405,6 +407,7 @@ const Canvas = (() => {
   }
 
   function refreshToolbar() {
+    refreshResizeLayer();
     if (!tbNodeId) return;
     const nodeEl = document.querySelector(`#${pageId} [data-node-id="${tbNodeId}"]`);
     if (!nodeEl) { hideToolbar(); return; }
@@ -482,6 +485,10 @@ const Canvas = (() => {
     document.body.classList.remove('sb-dragging-active');
     document.querySelectorAll('.drop-indicator').forEach(el => el.remove());
     pointerDrag = null;
+
+    const selectedId = Store.getSelectedId();
+    const selectedEl = selectedId ? document.querySelector(`#${pageId} [data-node-id="${selectedId}"]`) : null;
+    if (selectedEl) showResizeLayer(selectedEl);
   }
 
   function beginDrag(e) {
@@ -505,6 +512,7 @@ const Canvas = (() => {
 
     nodeEl.classList.add('is-dragging');
     document.body.classList.add('sb-dragging-active');
+    hideResizeLayer();
     Store.setSelectedId(pointerDrag.nodeId);
 
     try { document.getElementById(pageId)?.setPointerCapture(e.pointerId); } catch (err) {}
@@ -729,23 +737,73 @@ const Canvas = (() => {
 
   // ---------- INLINE TEXT EDITING ----------
 
-  function findEditableTextKey(node) {
-    const def = BLOCK_REGISTRY[node.type];
-    if (!def || !def.fields) return null;
-    const textField = def.fields.find(f => f.key === 'text' && (f.type === 'text' || f.type === 'textarea'));
-    if (textField) return textField.key;
-    const richField = def.fields.find(f => f.key === 'html' && node.type === 'rich-text');
-    if (richField) return richField.key;
+  function resolveInlineEdit(node, nodeEl, clicked) {
+    const within = el => !!(el && nodeEl.contains(el));
+    const pick = (selector, key) => {
+      let el = clicked && clicked.closest ? clicked.closest(selector) : null;
+      if (!within(el)) el = nodeEl.querySelector(selector);
+      return within(el) ? { key, el } : null;
+    };
+
+    switch (node.type) {
+      case 'heading': return pick('h1,h2,h3,h4,h5,h6', 'text');
+      case 'text': return pick('p', 'text');
+      case 'blockquote': return pick('blockquote p, p', 'text');
+      case 'rich-text': {
+        const el = nodeEl.querySelector('.sb-rich-text');
+        return el ? { key: 'html', el } : null;
+      }
+      case 'button': return pick('a', 'text');
+      case 'nav-link': return pick('a', 'label');
+      case 'logo': return pick('a span, a', 'text');
+      case 'submit-button': return pick('button', 'text');
+      case 'input':
+      case 'textarea':
+      case 'select': return pick('label', 'label');
+      case 'list': {
+        const lis = Array.from(nodeEl.querySelectorAll('li'));
+        if (!lis.length) return null;
+        let li = clicked && clicked.closest ? clicked.closest('li') : null;
+        if (!li || !within(li)) li = lis[0];
+        return { key: 'items', el: li, list: true, index: lis.indexOf(li) };
+      }
+      case 'hero': {
+        const el = clicked && clicked.closest ? clicked.closest('h1,h2,h3,h4,h5,h6,p,a') : null;
+        if (within(el)) {
+          if (/^H[1-6]$/.test(el.tagName)) return { key: 'heading', el };
+          if (el.tagName === 'A') return { key: 'buttonText', el };
+          if (el.tagName === 'P') return { key: 'subheading', el };
+        }
+        const h = nodeEl.querySelector('h1,h2,h3,h4,h5,h6');
+        return h ? { key: 'heading', el: h } : null;
+      }
+    }
     return null;
   }
 
-  function startInlineEdit(node, key, nodeEl) {
-    // For heading/text, target the actual text element inside
-    const target = key === 'html' ? (nodeEl.querySelector('.sb-rich-text') || nodeEl) : (nodeEl.querySelector('h1,h2,h3,h4,h5,h6,p') || nodeEl);
-    const originalHtml = target.innerHTML;
-    const originalValue = node.props[key] || '';
+  function listItems(node) {
+    return String(node.props?.items || '').split(/[|\n]/).map(s => s.trim()).filter(Boolean);
+  }
 
-    if (key === 'html') {
+  function startInlineEdit(node, editable, nodeEl) {
+    const key = editable.key;
+    const target = editable.el;
+    if (!target) return;
+
+    const isHtml = key === 'html';
+    const isList = !!editable.list;
+
+    let originalValue;
+    if (isList) {
+      originalValue = listItems(node)[editable.index] ?? '';
+    } else {
+      originalValue = node.props[key] ?? '';
+    }
+
+    const originalHtml = target.innerHTML;
+    const originalText = target.innerText.trim();
+
+    if (isHtml) {
       if (richTextToolbar) richTextToolbar.remove();
       richTextToolbar = document.createElement('div');
       richTextToolbar.className = 'sb-richtext-toolbar';
@@ -784,27 +842,344 @@ const Canvas = (() => {
     target.classList.add('inline-editing');
     document.execCommand('selectAll', false, null);
 
+    let finished = false;
     const finish = (save) => {
+      if (finished) return;
+      finished = true;
       target.contentEditable = 'false';
       target.classList.remove('inline-editing');
       if (richTextToolbar) { richTextToolbar.remove(); richTextToolbar = null; }
-      if (save) {
-        const text = key === 'html' ? target.innerHTML.trim() : target.innerText.trim();
-        if (text !== originalValue) {
-          Store.dispatch(Commands.setProp(node.id, key, text));
-          if (typeof Editor !== 'undefined') Editor.refreshPanels(false);
-        }
-      } else {
+
+      if (!save) {
         target.innerHTML = originalHtml;
+        return;
       }
+
+      if (isList) {
+        const text = target.innerText.trim();
+        if (text === originalText) return;
+        const parts = listItems(node);
+        parts[editable.index] = text;
+        Store.dispatch(Commands.setProp(node.id, 'items', parts.filter(Boolean).join('|')));
+        if (typeof Editor !== 'undefined') Editor.refreshPanels(false);
+        return;
+      }
+
+      const text = isHtml ? target.innerHTML.trim() : target.innerText.trim();
+      if (text === (isHtml ? String(originalValue).trim() : originalText)) return;
+      Store.dispatch(Commands.setProp(node.id, key, text));
+      if (typeof Editor !== 'undefined') Editor.refreshPanels(false);
     };
 
     target.addEventListener('blur', () => finish(true), { once: true });
     target.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') { e.preventDefault(); finish(false); }
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finish(true); }
+      else if (e.key === 'Enter' && !e.shiftKey && !isHtml) { e.preventDefault(); finish(true); }
       e.stopPropagation();
     });
+  }
+
+  // ---------- RESIZE HANDLES & SNAPPING ----------
+
+  const RZ_HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+
+  let rzLayer = null;
+  let rzNodeId = null;
+  let rzNodeEl = null;
+  let rzState = null;
+  let rzGuides = null;
+
+  function ensureResizeLayer() {
+    if (rzLayer) return rzLayer;
+
+    rzLayer = document.createElement('div');
+    rzLayer.className = 'sb-resize-layer';
+    rzLayer.hidden = true;
+    rzLayer.innerHTML = RZ_HANDLES.map(h => `<span class="sb-rz sb-rz-${h}" data-rz="${h}"></span>`).join('') +
+      '<span class="sb-resize-size" data-rz-size></span>';
+    document.body.appendChild(rzLayer);
+    rzLayer.addEventListener('pointerdown', onResizeStart);
+
+    rzGuides = {
+      v: document.createElement('div'),
+      h: document.createElement('div')
+    };
+    rzGuides.v.className = 'sb-snap-guide sb-snap-guide--v';
+    rzGuides.h.className = 'sb-snap-guide sb-snap-guide--h';
+    Object.values(rzGuides).forEach(g => { g.hidden = true; document.body.appendChild(g); });
+
+    return rzLayer;
+  }
+
+  function showResizeLayer(nodeEl) {
+    ensureResizeLayer();
+    rzNodeId = nodeEl.dataset.nodeId;
+    rzNodeEl = nodeEl;
+    rzLayer.hidden = false;
+    positionResizeLayer();
+  }
+
+  function hideResizeLayer() {
+    rzNodeId = null;
+    rzNodeEl = null;
+    if (rzLayer) rzLayer.hidden = true;
+    hideGuides();
+  }
+
+  function refreshResizeLayer() {
+    if (!rzNodeId || !rzLayer || rzLayer.hidden || rzState) return;
+    const nodeEl = document.querySelector(`#${pageId} [data-node-id="${rzNodeId}"]`);
+    if (!nodeEl) { hideResizeLayer(); return; }
+    rzNodeEl = nodeEl;
+    positionResizeLayer();
+  }
+
+  function positionResizeLayer() {
+    if (!rzNodeEl || !rzLayer) return;
+    const r = rzNodeEl.getBoundingClientRect();
+    rzLayer.style.left = Math.round(r.left) + 'px';
+    rzLayer.style.top = Math.round(r.top) + 'px';
+    rzLayer.style.width = Math.round(r.width) + 'px';
+    rzLayer.style.height = Math.round(r.height) + 'px';
+  }
+
+  function canvasZoom() {
+    const pageEl = document.getElementById(pageId);
+    if (!pageEl || !pageEl.offsetWidth) return 1;
+    return (pageEl.getBoundingClientRect().width / pageEl.offsetWidth) || 1;
+  }
+
+  function collectSnapTargets(nodeEl) {
+    const parentWrap = nodeEl.parentElement && nodeEl.parentElement.closest
+      ? nodeEl.parentElement.closest('[data-node-id]')
+      : null;
+    const parentEl = parentWrap || document.getElementById(pageId);
+    const parentRect = parentEl ? parentEl.getBoundingClientRect() : null;
+    const xs = [];
+    const ys = [];
+
+    if (parentRect) {
+      xs.push(parentRect.left, parentRect.left + parentRect.width / 2, parentRect.right);
+      ys.push(parentRect.top, parentRect.top + parentRect.height / 2, parentRect.bottom);
+    }
+
+    if (parentEl) {
+      Array.from(parentEl.children).forEach(sib => {
+        if (sib === nodeEl || !sib.dataset || !sib.dataset.nodeId) return;
+        const r = sib.getBoundingClientRect();
+        if (!r.width && !r.height) return;
+        xs.push(r.left, r.left + r.width / 2, r.right);
+        ys.push(r.top, r.top + r.height / 2, r.bottom);
+      });
+    }
+
+    return { xs, ys, parentRect };
+  }
+
+  function onResizeStart(e) {
+    const handleEl = e.target.closest('[data-rz]');
+    if (!handleEl || !rzNodeEl) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const node = Store.getPage().nodes[rzNodeId];
+    if (!node) return;
+
+    const bp = Store.getBreakpoint();
+    const resolved = NodeUtils.resolveStyles(node, bp);
+    const rect = rzNodeEl.getBoundingClientRect();
+    const zoom = canvasZoom();
+
+    rzState = {
+      id: rzNodeId,
+      nodeEl: rzNodeEl,
+      bp,
+      handle: handleEl.dataset.rz,
+      startX: e.clientX,
+      startY: e.clientY,
+      startRect: rect,
+      zoom,
+      startW: rect.width / zoom,
+      startH: rect.height / zoom,
+      startML: parseFloat(resolved.marginLeft) || 0,
+      startMT: parseFloat(resolved.marginTop) || 0,
+      ratio: rect.height ? rect.width / rect.height : 1,
+      targets: collectSnapTargets(rzNodeEl),
+      styleBackup: rzNodeEl.getAttribute('style') || '',
+      moved: false,
+      current: null
+    };
+
+    document.body.classList.add('sb-resizing');
+    window.addEventListener('pointermove', onResizeMove);
+    window.addEventListener('pointerup', onResizeEnd);
+    window.addEventListener('pointercancel', onResizeCancel);
+  }
+
+  function applyResizePreview(w, h, offsetX, offsetY) {
+    const s = rzState;
+    if (!s) return;
+    const el = s.nodeEl;
+    el.style.width = w + 'px';
+    el.style.height = h + 'px';
+    el.style.maxWidth = 'none';
+    el.style.marginLeft = (s.startML + offsetX) + 'px';
+    el.style.marginTop = (s.startMT + offsetY) + 'px';
+  }
+
+  function nearestSnap(value, list, threshold) {
+    let best = null;
+    list.forEach(candidate => {
+      const d = Math.abs(candidate - value);
+      if (d <= threshold && (!best || d < best.d)) best = { d, value: candidate };
+    });
+    return best;
+  }
+
+  function onResizeMove(e) {
+    const s = rzState;
+    if (!s) return;
+    s.moved = true;
+
+    const dx = (e.clientX - s.startX) / s.zoom;
+    const dy = (e.clientY - s.startY) / s.zoom;
+    const dirs = {
+      w: s.handle.includes('w'),
+      e: s.handle.includes('e'),
+      n: s.handle.includes('n'),
+      s: s.handle.includes('s')
+    };
+
+    let w = s.startW;
+    let h = s.startH;
+    if (dirs.e) w = s.startW + dx;
+    if (dirs.w) w = s.startW - dx;
+    if (dirs.s) h = s.startH + dy;
+    if (dirs.n) h = s.startH - dy;
+
+    if (e.shiftKey) {
+      if ((dirs.e || dirs.w) && (dirs.n || dirs.s)) {
+        if (Math.abs(dx) >= Math.abs(dy)) h = w / s.ratio;
+        else w = h * s.ratio;
+      } else if (dirs.e || dirs.w) {
+        h = w / s.ratio;
+      } else {
+        w = h * s.ratio;
+      }
+    }
+
+    w = Math.max(24, w);
+    h = Math.max(24, h);
+
+    applyResizePreview(w, h, dirs.w ? s.startW - w : 0, dirs.n ? s.startH - h : 0);
+    positionResizeLayer();
+
+    const threshold = 6;
+    let snapX = null;
+    let snapY = null;
+    let rect = s.nodeEl.getBoundingClientRect();
+
+    if (dirs.e || dirs.w) {
+      const edge = dirs.e ? rect.right : rect.left;
+      const hit = nearestSnap(edge, s.targets.xs, threshold);
+      if (hit) {
+        const delta = (hit.value - edge) / s.zoom;
+        w = Math.max(24, dirs.e ? w + delta : w - delta);
+        snapX = hit.value;
+      }
+    }
+    if (dirs.n || dirs.s) {
+      const edge = dirs.s ? rect.bottom : rect.top;
+      const hit = nearestSnap(edge, s.targets.ys, threshold);
+      if (hit) {
+        const delta = (hit.value - edge) / s.zoom;
+        h = Math.max(24, dirs.s ? h + delta : h - delta);
+        snapY = hit.value;
+      }
+    }
+
+    applyResizePreview(w, h, dirs.w ? s.startW - w : 0, dirs.n ? s.startH - h : 0);
+    positionResizeLayer();
+    rect = s.nodeEl.getBoundingClientRect();
+
+    const label = rzLayer.querySelector('[data-rz-size]');
+    if (label) label.textContent = `${Math.round(w)} × ${Math.round(h)}`;
+
+    if (snapX != null) showGuide('v', snapX, s.targets.parentRect);
+    else hideGuide('v');
+    if (snapY != null) showGuide('h', snapY, s.targets.parentRect);
+    else hideGuide('h');
+
+    s.current = {
+      w, h,
+      offsetX: dirs.w ? s.startW - w : 0,
+      offsetY: dirs.n ? s.startH - h : 0
+    };
+  }
+
+  function onResizeEnd() {
+    if (!rzState) return;
+    const s = rzState;
+    window.removeEventListener('pointermove', onResizeMove);
+    window.removeEventListener('pointerup', onResizeEnd);
+    window.removeEventListener('pointercancel', onResizeCancel);
+    document.body.classList.remove('sb-resizing');
+    hideGuides();
+
+    if (s.moved && s.current) {
+      const styles = {
+        width: Math.round(s.current.w) + 'px',
+        height: Math.round(s.current.h) + 'px'
+      };
+      if (s.current.offsetX) styles.marginLeft = Math.round(s.startML + s.current.offsetX) + 'px';
+      if (s.current.offsetY) styles.marginTop = Math.round(s.startMT + s.current.offsetY) + 'px';
+      Store.dispatch(Commands.setStyles(s.id, s.bp, styles));
+      if (typeof Editor !== 'undefined') Editor.refreshPanels(false);
+    } else {
+      s.nodeEl.setAttribute('style', s.styleBackup);
+    }
+
+    rzState = null;
+    refreshResizeLayer();
+  }
+
+  function onResizeCancel() {
+    if (!rzState) return;
+    const s = rzState;
+    window.removeEventListener('pointermove', onResizeMove);
+    window.removeEventListener('pointerup', onResizeEnd);
+    window.removeEventListener('pointercancel', onResizeCancel);
+    document.body.classList.remove('sb-resizing');
+    hideGuides();
+    s.nodeEl.setAttribute('style', s.styleBackup);
+    rzState = null;
+    refreshResizeLayer();
+  }
+
+  function showGuide(axis, pos, parentRect) {
+    if (!rzGuides) return;
+    const g = rzGuides[axis];
+    g.hidden = false;
+    if (axis === 'v') {
+      const pr = parentRect || { top: 0, height: window.innerHeight };
+      g.style.left = Math.round(pos) + 'px';
+      g.style.top = Math.round(pr.top) + 'px';
+      g.style.height = Math.round(pr.height) + 'px';
+    } else {
+      const pr = parentRect || { left: 0, width: window.innerWidth };
+      g.style.top = Math.round(pos) + 'px';
+      g.style.left = Math.round(pr.left) + 'px';
+      g.style.width = Math.round(pr.width) + 'px';
+    }
+  }
+
+  function hideGuide(axis) {
+    if (rzGuides && rzGuides[axis]) rzGuides[axis].hidden = true;
+  }
+
+  function hideGuides() {
+    hideGuide('v');
+    hideGuide('h');
   }
 
   // ---------- HELPERS ----------
@@ -833,5 +1208,10 @@ const Canvas = (() => {
     e.dataTransfer.setData('text/plain', blockType);
   }
 
-  return { render, startPaletteDrag, clearHighlights };
+  // Keep floating overlays aligned after zoom changes
+  function refreshOverlays() {
+    refreshToolbar();
+  }
+
+  return { render, startPaletteDrag, clearHighlights, refreshOverlays };
 })();

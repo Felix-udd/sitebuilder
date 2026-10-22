@@ -196,6 +196,36 @@ const Commands = (() => {
     };
   }
 
+  // Apply several style declarations in one undo step (resize handles, nudges).
+  function setStyles(nodeId, breakpoint, entries) {
+    let oldValues = {};
+
+    return {
+      type: 'SET_STYLES',
+      coalesceKey: `SET_STYLES:${nodeId}:${breakpoint}:${Object.keys(entries).join(',')}`,
+      validate(page) {
+        const node = page.nodes[nodeId];
+        if (!node) return false;
+        oldValues = {};
+        Object.keys(entries).forEach(key => {
+          oldValues[key] = node.style?.[breakpoint]?.[key];
+        });
+        return true;
+      },
+      apply(page) {
+        let next = page;
+        Object.entries(entries).forEach(([property, value]) => {
+          next = NodeUtils.updateStyle(next, nodeId, breakpoint, property, value);
+        });
+        return next;
+      },
+      inverse() {
+        return setStyles(nodeId, breakpoint, oldValues);
+      },
+      coalesce: true
+    };
+  }
+
   // ---- Props updates ----
 
   function setProp(nodeId, key, value) {
@@ -320,6 +350,7 @@ const Commands = (() => {
     moveNode,
     duplicateNode,
     setStyle,
+    setStyles,
     setProp,
     setAnimation,
     setSetting,

@@ -195,7 +195,11 @@ const NodeUtils = (() => {
     if (!node) return page;
 
     if (!node.style) node.style = {};
-    if (!node.style[breakpoint]) node.style[breakpoint] = {};
+    // Legacy pages stored breakpoints as arrays; normalise before writing so
+    // JSON snapshots and saves keep the values.
+    if (!node.style[breakpoint] || typeof node.style[breakpoint] !== 'object' || Array.isArray(node.style[breakpoint])) {
+      node.style[breakpoint] = {};
+    }
 
     if (value === null || value === undefined || value === '') {
       delete node.style[breakpoint][property];
